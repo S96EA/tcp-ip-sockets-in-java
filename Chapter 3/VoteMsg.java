@@ -1,63 +1,72 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+public class VoteMsg {
+  private boolean isInquiry; // true if inquiry; false if vote
+  private boolean isResponse;// true if response from server
+  private int candidateID;   // in [0,1000]
+  private long voteCount;    // nonzero only in response
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+  public static final int MAX_CANDIDATE_ID = 1000;
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
-
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
+  public VoteMsg(boolean isResponse, boolean isInquiry, int candidateID, long voteCount)
+      throws IllegalArgumentException {
+    // check invariants
+    if (voteCount != 0 && !isResponse) {
+      throw new IllegalArgumentException("Request vote count must be zero");
     }
-    return rtn.toString();
-  }
-
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
+    if (candidateID < 0 || candidateID > MAX_CANDIDATE_ID) {
+      throw new IllegalArgumentException("Bad Candidate ID: " + candidateID);
     }
-    return offset;
-  }
-
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
+    if (voteCount < 0) {
+      throw new IllegalArgumentException("Total must be >= zero");
     }
-    return rtn;
+    this.candidateID = candidateID;
+    this.isResponse = isResponse;
+    this.isInquiry = isInquiry;
+    this.voteCount = voteCount;
   }
 
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
-    
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
+  public void setInquiry(boolean isInquiry) {
+    this.isInquiry = isInquiry;
   }
 
+  public void setResponse(boolean isResponse) {
+    this.isResponse = isResponse;
+  }
+
+  public boolean isInquiry() {
+    return isInquiry;
+  }
+
+  public boolean isResponse() {
+    return isResponse;
+  }
+
+  public void setCandidateID(int candidateID) throws IllegalArgumentException {
+    if (candidateID < 0 || candidateID > MAX_CANDIDATE_ID) {
+      throw new IllegalArgumentException("Bad Candidate ID: " + candidateID);
+    }
+    this.candidateID = candidateID;
+  }
+
+  public int getCandidateID() {
+    return candidateID;
+  }
+
+  public void setVoteCount(long count) {
+    if ((count != 0 && !isResponse) || count < 0) {
+      throw new IllegalArgumentException("Bad vote count");
+    }
+    voteCount = count;
+  }
+
+  public long getVoteCount() {
+    return voteCount;
+  }
+
+  public String toString() {
+    String res = (isInquiry ? "inquiry" : "vote") + " for candidate " + candidateID;
+    if (isResponse) {
+      res = "response to " + res + " who now has " + voteCount + " vote(s)";
+    }
+    return res;
+  }
 }

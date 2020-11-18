@@ -1,63 +1,55 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+import java.io.OutputStream;
+import java.net.Socket;
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+public class VoteClientTCP {
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
+  public static final int CANDIDATEID = 888;
 
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
+  public static void main(String args[]) throws Exception {
+
+    if (args.length != 2) { // Test for correct # of args
+      throw new IllegalArgumentException("Parameter(s): <Server> <Port>");
     }
-    return rtn.toString();
-  }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
-    }
-    return offset;
-  }
+    String destAddr = args[0]; // Destination address
+    int destPort = Integer.parseInt(args[1]); // Destination port
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
-    }
-    return rtn;
-  }
+    Socket sock = new Socket(destAddr, destPort);
+    OutputStream out = sock.getOutputStream();
 
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
+    // Change Bin to Text for a different framing strategy
+    VoteMsgCoder coder = new VoteMsgBinCoder();
+    // Change Length to Delim for a different encoding strategy
+    Framer framer = new LengthFramer(sock.getInputStream());
+
+    // Create an inquiry request (2nd arg = true)
+    VoteMsg msg = new VoteMsg(false, true, CANDIDATEID, 0);
+    byte[] encodedMsg = coder.toWire(msg);
+
+    // Send request
+    System.out.println("Sending Inquiry (" + encodedMsg.length + " bytes): ");
+    System.out.println(msg);
+    framer.frameMsg(encodedMsg, out);
+
+    // Now send a vote
+    msg.setInquiry(false);
+    encodedMsg = coder.toWire(msg);
+    System.out.println("Sending Vote (" + encodedMsg.length + " bytes): ");
+    framer.frameMsg(encodedMsg, out);
     
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
-  }
+    // Receive inquiry response
+    encodedMsg = framer.nextMsg();
+    msg = coder.fromWire(encodedMsg);
+    System.out.println("Received Response (" + encodedMsg.length
+               + " bytes): ");
+    System.out.println(msg);
 
+    // Receive vote response
+    msg = coder.fromWire(framer.nextMsg());
+    System.out.println("Received Response (" + encodedMsg.length
+           + " bytes): ");
+    System.out.println(msg);
+    
+    sock.close();
+  }
 }

@@ -1,63 +1,83 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.util.Iterator;
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+public class UDPEchoServerSelector {
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
+  private static final int TIMEOUT = 3000; // Wait timeout (milliseconds)
 
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
+  private static final int ECHOMAX = 255; // Maximum size of echo datagram
+
+  public static void main(String[] args) throws IOException {
+
+    if (args.length != 1) // Test for correct argument list
+      throw new IllegalArgumentException("Parameter(s): <Port>");
+
+    int servPort = Integer.parseInt(args[0]);
+
+    // Create a selector to multiplex client connections.
+    Selector selector = Selector.open();
+
+    DatagramChannel channel = DatagramChannel.open();
+    channel.configureBlocking(false);
+    channel.socket().bind(new InetSocketAddress(servPort));
+    channel.register(selector, SelectionKey.OP_READ, new ClientRecord());
+
+    while (true) { // Run forever, receiving and echoing datagrams
+      // Wait for task or until timeout expires
+      if (selector.select(TIMEOUT) == 0) {
+        System.out.print(".");
+        continue;
+      }
+
+      // Get iterator on set of keys with I/O to process
+      Iterator<SelectionKey> keyIter = selector.selectedKeys().iterator();
+      while (keyIter.hasNext()) {
+        SelectionKey key = keyIter.next(); // Key is bit mask
+
+        // Client socket channel has pending data?
+        if (key.isReadable())
+          handleRead(key);
+
+        // Client socket channel is available for writing and
+        // key is valid (i.e., channel not closed).
+        if (key.isValid() && key.isWritable())
+          handleWrite(key);
+
+        keyIter.remove();
+      }
     }
-    return rtn.toString();
   }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
+  public static void handleRead(SelectionKey key) throws IOException {
+    DatagramChannel channel = (DatagramChannel) key.channel();
+    ClientRecord clntRec = (ClientRecord) key.attachment();
+    clntRec.buffer.clear();    // Prepare buffer for receiving
+    clntRec.clientAddress = channel.receive(clntRec.buffer);
+    if (clntRec.clientAddress != null) {  // Did we receive something?
+      // Register write with the selector
+      key.interestOps(SelectionKey.OP_WRITE);
     }
-    return offset;
   }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
+  public static void handleWrite(SelectionKey key) throws IOException {
+    DatagramChannel channel = (DatagramChannel) key.channel();
+    ClientRecord clntRec = (ClientRecord) key.attachment();
+    clntRec.buffer.flip(); // Prepare buffer for sending
+    int bytesSent = channel.send(clntRec.buffer, clntRec.clientAddress);
+    if (bytesSent != 0) { // Buffer completely written?
+      // No longer interested in writes
+      key.interestOps(SelectionKey.OP_READ);
     }
-    return rtn;
   }
 
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
-    
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
+  static class ClientRecord {
+    public SocketAddress clientAddress;
+    public ByteBuffer buffer = ByteBuffer.allocate(ECHOMAX);
   }
-
 }

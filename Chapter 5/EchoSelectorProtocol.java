@@ -1,63 +1,53 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+import java.nio.channels.SelectionKey;
+import java.nio.channels.SocketChannel;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.ByteBuffer;
+import java.io.IOException;
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+public class EchoSelectorProtocol implements TCPProtocol {
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
+  private int bufSize; // Size of I/O buffer
 
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
-    }
-    return rtn.toString();
+  public EchoSelectorProtocol(int bufSize) {
+    this.bufSize = bufSize;
   }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
-    }
-    return offset;
+  public void handleAccept(SelectionKey key) throws IOException {
+    SocketChannel clntChan = ((ServerSocketChannel) key.channel()).accept();
+    clntChan.configureBlocking(false); // Must be nonblocking to register
+    // Register the selector with new channel for read and attach byte buffer
+    clntChan.register(key.selector(), SelectionKey.OP_READ, ByteBuffer
+        .allocate(bufSize));
   }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
+  public void handleRead(SelectionKey key) throws IOException {
+    // Client socket channel has pending data
+    SocketChannel clntChan = (SocketChannel) key.channel();
+    ByteBuffer buf = (ByteBuffer) key.attachment();
+    long bytesRead = clntChan.read(buf);
+    if (bytesRead == -1) { // Did the other end close?
+      clntChan.close();
+    } else if (bytesRead > 0) {
+      // Indicate via key that reading/writing are both of interest now.
+      key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
     }
-    return rtn;
   }
 
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
-    
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
+  public void handleWrite(SelectionKey key) throws IOException {
+    /*
+     * Channel is available for writing, and key is valid (i.e., client channel
+     * not closed).
+     */
+    // Retrieve data read earlier
+    ByteBuffer buf = (ByteBuffer) key.attachment();
+    buf.flip(); // Prepare buffer for writing
+    SocketChannel clntChan = (SocketChannel) key.channel();
+    clntChan.write(buf);
+    if (!buf.hasRemaining()) { // Buffer completely written?
+      // Nothing left, so no longer interested in writes
+      key.interestOps(SelectionKey.OP_READ);
+    }
+    buf.compact(); // Make room for more data to be read in
   }
 
 }

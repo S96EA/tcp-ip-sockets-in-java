@@ -1,63 +1,82 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+/* Wire Format
+ *                                1  1  1  1  1  1
+ *  0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+ * +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+ * |     Magic       |Flags|       ZERO            |
+ * +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+ * |                  Candidate ID                 |
+ * +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+ * |                                               |
+ * |         Vote Count (only in response)         |
+ * |                                               |
+ * |                                               |
+ * +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+ */
+public class VoteMsgBinCoder implements VoteMsgCoder {
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
+  // manifest constants for encoding
+  public static final int MIN_WIRE_LENGTH = 4;
+  public static final int MAX_WIRE_LENGTH = 16;
+  public static final int MAGIC = 0x5400;
+  public static final int MAGIC_MASK = 0xfc00;
+  public static final int MAGIC_SHIFT = 8;
+  public static final int RESPONSE_FLAG = 0x0200;
+  public static final int INQUIRE_FLAG =  0x0100;
 
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
+  public byte[] toWire(VoteMsg msg) throws IOException {
+    ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+    DataOutputStream out = new DataOutputStream(byteStream); // converts ints
+
+    short magicAndFlags = MAGIC;
+    if (msg.isInquiry()) {
+      magicAndFlags |= INQUIRE_FLAG;
     }
-    return rtn.toString();
-  }
-
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
+    if (msg.isResponse()) {
+      magicAndFlags |= RESPONSE_FLAG;
     }
-    return offset;
-  }
-
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
+    out.writeShort(magicAndFlags);
+    // We know the candidate ID will fit in a short: it's > 0 && < 1000 
+    out.writeShort((short) msg.getCandidateID());
+    if (msg.isResponse()) {
+      out.writeLong(msg.getVoteCount());
     }
-    return rtn;
+    out.flush();
+    byte[] data = byteStream.toByteArray();
+    return data;
   }
 
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
-    
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
+  public VoteMsg fromWire(byte[] input) throws IOException {
+    // sanity checks
+    if (input.length < MIN_WIRE_LENGTH) {
+      throw new IOException("Runt message");
+    }
+    ByteArrayInputStream bs = new ByteArrayInputStream(input);
+    DataInputStream in = new DataInputStream(bs);
+    int magic = in.readShort();
+    if ((magic & MAGIC_MASK) != MAGIC) {
+      throw new IOException("Bad Magic #: " +
+			    ((magic & MAGIC_MASK) >> MAGIC_SHIFT));
+    }
+    boolean resp = ((magic & RESPONSE_FLAG) != 0);
+    boolean inq = ((magic & INQUIRE_FLAG) != 0);
+    int candidateID = in.readShort();
+    if (candidateID < 0 || candidateID > 1000) {
+      throw new IOException("Bad candidate ID: " + candidateID);
+    }
+    long count = 0;
+    if (resp) {
+      count = in.readLong();
+      if (count < 0) {
+        throw new IOException("Bad vote count: " + count);
+      }
+    }
+    // Ignore any extra bytes
+    return new VoteMsg(resp, inq, candidateID, count);
   }
-
 }

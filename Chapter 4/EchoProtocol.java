@@ -1,63 +1,49 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+public class EchoProtocol implements Runnable {
+  private static final int BUFSIZE = 32; // Size (in bytes) of I/O buffer
+  private Socket clntSock;               // Socket connect to client
+  private Logger logger;                 // Server logger
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
+  public EchoProtocol(Socket clntSock, Logger logger) {
+    this.clntSock = clntSock;
+    this.logger = logger;
+  }
 
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
+  public static void handleEchoClient(Socket clntSock, Logger logger) {
+    try {
+      // Get the input and output I/O streams from socket
+      InputStream in = clntSock.getInputStream();
+      OutputStream out = clntSock.getOutputStream();
+
+      int recvMsgSize; // Size of received message
+      int totalBytesEchoed = 0; // Bytes received from client
+      byte[] echoBuffer = new byte[BUFSIZE]; // Receive Buffer
+      // Receive until client closes connection, indicated by -1
+      while ((recvMsgSize = in.read(echoBuffer)) != -1) {
+        out.write(echoBuffer, 0, recvMsgSize);
+        totalBytesEchoed += recvMsgSize;
+      }
+
+      logger.info("Client " + clntSock.getRemoteSocketAddress() + ", echoed "
+          + totalBytesEchoed + " bytes.");
+
+    } catch (IOException ex) {
+      logger.log(Level.WARNING, "Exception in echo protocol", ex);
+    } finally {
+      try {
+        clntSock.close();
+      } catch (IOException e) {
+      }
     }
-    return rtn.toString();
   }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
-    }
-    return offset;
+  public void run() {
+    handleEchoClient(clntSock, logger);
   }
-
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
-    }
-    return rtn;
-  }
-
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
-    
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
-  }
-
 }

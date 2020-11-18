@@ -1,63 +1,62 @@
-public class BruteForceCoding {
-  private static byte byteVal = 101; // one hundred and one
-  private static short shortVal = 10001; // ten thousand and one
-  private static int intVal = 100000001; // one hundred million and one
-  private static long longVal = 1000000000001L;// one trillion and one
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.util.Iterator;
 
-  private final static int BSIZE = Byte.SIZE / Byte.SIZE;
-  private final static int SSIZE = Short.SIZE / Byte.SIZE;
-  private final static int ISIZE = Integer.SIZE / Byte.SIZE;
-  private final static int LSIZE = Long.SIZE / Byte.SIZE;
+public class TCPServerSelector {
 
-  private final static int BYTEMASK = 0xFF; // 8 bits
+  private static final int BUFSIZE = 256;  // Buffer size (bytes)
+  private static final int TIMEOUT = 3000; // Wait timeout (milliseconds)
 
-  public static String byteArrayToDecimalString(byte[] bArray) {
-    StringBuilder rtn = new StringBuilder();
-    for (byte b : bArray) {
-      rtn.append(b & BYTEMASK).append(" ");
+  public static void main(String[] args) throws IOException {
+
+    if (args.length < 1) { // Test for correct # of args
+      throw new IllegalArgumentException("Parameter(s): <Port> ...");
     }
-    return rtn.toString();
-  }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static int encodeIntBigEndian(byte[] dst, long val, int offset, int size) {
-    for (int i = 0; i < size; i++) {
-      dst[offset++] = (byte) (val >> ((size - i - 1) * Byte.SIZE));
+    // Create a selector to multiplex listening sockets and connections
+    Selector selector = Selector.open();
+
+    // Create listening socket channel for each port and register selector
+    for (String arg : args) {
+      ServerSocketChannel listnChannel = ServerSocketChannel.open();
+      listnChannel.socket().bind(new InetSocketAddress(Integer.parseInt(arg)));
+      listnChannel.configureBlocking(false); // must be nonblocking to register
+      // Register selector with channel. The returned key is ignored
+      listnChannel.register(selector, SelectionKey.OP_ACCEPT);
     }
-    return offset;
-  }
 
-  // Warning:  Untested preconditions (e.g., 0 <= size <= 8)
-  public static long decodeIntBigEndian(byte[] val, int offset, int size) {
-    long rtn = 0;
-    for (int i = 0; i < size; i++) {
-      rtn = (rtn << Byte.SIZE) | ((long) val[offset + i] & BYTEMASK);
+    // Create a handler that will implement the protocol
+    TCPProtocol protocol = new EchoSelectorProtocol(BUFSIZE);
+
+    while (true) { // Run forever, processing available I/O operations
+      // Wait for some channel to be ready (or timeout)
+      if (selector.select(TIMEOUT) == 0) { // returns # of ready chans
+        System.out.print(".");
+        continue;
+      }
+
+      // Get iterator on set of keys with I/O to process
+      Iterator<SelectionKey> keyIter = selector.selectedKeys().iterator();
+      while (keyIter.hasNext()) {
+        SelectionKey key = keyIter.next(); // Key is bit mask
+        // Server socket channel has pending connection requests?
+        if (key.isAcceptable()) {
+          protocol.handleAccept(key);
+        }
+        // Client socket channel has pending data?
+        if (key.isReadable()) {
+          protocol.handleRead(key);
+        }
+        // Client socket channel is available for writing and
+        // key is valid (i.e., channel not closed)?
+        if (key.isValid() && key.isWritable()) {
+          protocol.handleWrite(key);
+        }
+        keyIter.remove(); // remove from set of selected keys
+      }
     }
-    return rtn;
   }
-
-  public static void main(String[] args) {
-    byte[] message = new byte[BSIZE + SSIZE + ISIZE + LSIZE];
-    // Encode the fields in the target byte array
-    int offset = encodeIntBigEndian(message, byteVal, 0, BSIZE);
-    offset = encodeIntBigEndian(message, shortVal, offset, SSIZE);
-    offset = encodeIntBigEndian(message, intVal, offset, ISIZE);
-    encodeIntBigEndian(message, longVal, offset, LSIZE);
-    System.out.println("Encoded message: " + byteArrayToDecimalString(message));
- 
-    // Decode several fields
-    long value = decodeIntBigEndian(message, BSIZE, SSIZE);
-    System.out.println("Decoded short = " + value);
-    value = decodeIntBigEndian(message, BSIZE + SSIZE + ISIZE, LSIZE);
-    System.out.println("Decoded long = " + value);
-    
-    // Demonstrate dangers of conversion
-    offset = 4;
-    value = decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Decoded value (offset " + offset + ", size " + BSIZE + ") = "
-        + value);
-    byte bVal = (byte) decodeIntBigEndian(message, offset, BSIZE);
-    System.out.println("Same value as byte = " + bVal);
-  }
-
 }
